@@ -1,5 +1,5 @@
-// Modo sin conexión de HYROXNENA. Versión 5deb5a16
-const CACHE = 'hyroxnena-5deb5a16';
+// Modo sin conexión de HYROXNENA. Versión 56136b67
+const CACHE = 'hyroxnena-56136b67';
 const CORE = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './apple-touch-icon.png'];
 
 self.addEventListener('install', e => {
