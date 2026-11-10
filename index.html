@@ -562,6 +562,30 @@ body::before {
   display: flex;
   gap: 8px;
 }
+/* ── Registro guiado por el plan ── */
+.rpe-guide { background: var(--surface2); border-radius: var(--radius-sm); margin-bottom: 12px; font-size: 13px; }
+.rpe-guide summary { padding: 10px 12px; cursor: pointer; font-weight: 600; color: var(--fg2); }
+.rpe-guide-rows { padding: 0 12px 12px; display: grid; gap: 6px; }
+.rpe-guide-row { display: flex; align-items: center; gap: 10px; color: var(--fg2); }
+.ex-log-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; margin-bottom: 10px; }
+.ex-log-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.ex-log-name { font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 15px; }
+.ex-log-target { font-size: 13px; color: var(--fg2); margin-top: 2px; }
+.rpe-badge { flex-shrink: 0; font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 13px; padding: 4px 10px; border-radius: 999px; white-space: nowrap; }
+.ex-log-note { font-size: 12px; color: var(--fg3); margin-top: 6px; line-height: 1.4; }
+.ex-log-sets { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 6px; margin-top: 10px; }
+.set-cell { display: flex; flex-direction: column; gap: 3px; }
+.set-cell span { font-size: 10px; font-weight: 700; color: var(--fg3); letter-spacing: 0.5px; text-align: center; }
+.set-w { width: 100%; min-width: 0; padding: 9px 4px; text-align: center; font-size: 16px; font-weight: 600; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--surface2); color: var(--fg); }
+.set-w:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.ex-log-unit { font-size: 11px; color: var(--fg3); margin-top: 4px; }
+.ex-log-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.ex-log-last { font-size: 12px; color: var(--fg3); }
+.ex-log-last button { margin-left: 6px; font-size: 12px; font-weight: 600; color: var(--accent2); background: none; border: none; padding: 2px 0; cursor: pointer; }
+.rpe-real-label { font-size: 12px; color: var(--fg3); display: flex; align-items: center; gap: 6px; }
+.rpe-real { padding: 5px 6px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--surface2); color: var(--fg); font-size: 14px; }
+.ex-log-noweight { font-size: 12px; color: var(--fg3); margin-top: 8px; }
+
 .feel-btn {
   flex: 1;
   padding: 10px 8px;
@@ -872,7 +896,12 @@ body::before {
   <form class="log-form" id="log-form" onsubmit="saveLog(event)">
     <div class="form-group">
       <label class="form-label" for="log-date">Fecha</label>
-      <input type="date" id="log-date" class="form-input" required>
+      <input type="date" id="log-date" class="form-input" required onchange="populateLogPlan()">
+    </div>
+
+    <div class="form-group">
+      <label class="form-label" for="log-plan">Sesión del plan</label>
+      <select id="log-plan" class="form-input" onchange="selectLogPlanSession()"></select>
     </div>
 
     <div class="form-group">
@@ -989,9 +1018,10 @@ body::before {
 
     <!-- Strength fields -->
     <div id="strength-fields" class="hidden">
-      <div class="form-group">
+      <div id="plan-exercises"></div>
+      <div class="form-group" id="log-exercises-group">
         <label class="form-label" for="log-exercises">Ejercicios realizados</label>
-        <textarea id="log-exercises" class="form-input" rows="3" placeholder="Sentadilla 4x8@60kg, Peso muerto 3x5@80kg..."></textarea>
+        <textarea id="log-exercises" class="form-input" rows="3" placeholder="Sentadilla 4x8@40kg, Peso muerto 3x5@50kg..."></textarea>
       </div>
     </div>
 
@@ -1288,101 +1318,190 @@ function generateWeekPlan(weekNum, daysPerWeek) {
   const longRun = r(isAdapt ? 6 : isBase ? 8 + step : isBuild ? 11 + step : isPeak ? 14 : 8);
   const tempoRun = r(isAdapt ? 3 : isBase ? 4 : isBuild ? 6 : isPeak ? 7 : 4);
 
-  // Progressive strength / stations
-  const strength = isAdapt
-    ? 'Sentadilla goblet 3x10 · RPE 5-6 (aprender técnica), Peso muerto rumano 3x10 · RPE 6, Flexiones 3x máx-2 reps, Remo con mancuerna 3x12 · RPE 6'
-    : isDeload
-    ? 'SEMANA DE DESCARGA · Sentadilla 2-3 series · RPE 6, Peso muerto 2-3 series · RPE 6 (mismo peso, 1 serie menos y 1 punto menos de RPE)'
-    : isBase
-    ? 'Sentadilla 3x8 · RPE 6-7 (2-3 reps en reserva), Peso muerto 3x8 · RPE 6-7, Press banca 3x10 · RPE 7, Remo con barra 3x10 · RPE 7'
-    : isBuild
-    ? 'Sentadilla 4x6 · RPE 7-8 (última serie RPE 8-9, 1-2 reps en reserva), Peso muerto 4x5 · RPE 8, Farmers carry 3x50m · RPE 8, Lunges con mancuernas 3x20 · RPE 7-8'
-    : isPeak
-    ? 'Sentadilla 5x5 · RPE 8-9 (últimas 2 series muy cerca del fallo), Peso muerto 4x4 · RPE 9 (última serie al fallo técnico), KB swings 4x20 · RPE 8, Box jumps 3x10 · máx explosividad'
-    : 'Sentadilla 3x5 · RPE 6 (conservar, no fatigar), Peso muerto 3x3 · RPE 6, Movilidad y activación 20min';
-
-  // Pesos oficiales Open Femenino
-  const sledW = '60kg';
-  const sandbagW = '10kg';
-  const wbW = '4kg (pelota 6kg)';
-  const farmersW = '2×12kg';
-
-  const stationsLight = isBase
-    ? `SkiErg 3×500m, Rowing 3×500m, Wall Balls 3×20 (${wbW})`
-    : isBuild
-    ? `SkiErg 2×1km, Rowing 2×1km, Sled Push 2×25m (${sledW}), Farmers Carry 2×50m (${farmersW})`
-    : isPeak
-    ? `Circuito ×2: SkiErg 1km · Sled Push 50m ${sledW} · Sled Pull 50m ${sledW} · Burpee BJ 80m · Rowing 1km · Farmers 200m ${farmersW} · Sandbag Lunges 100m ${sandbagW} · Wall Balls 100 reps ${wbW}`
-    : `Repasar 3-4 estaciones suaves, 1 circuito al 40% carga`;
+  // Bloques estructurados: cada ejercicio con series, reps, RPE objetivo y, si aplica, peso fijo
+  const strengthBlock = getStrengthBlock(phase.key, isDeload);
+  const stationBlock = getStationBlock(isAdapt ? 'base' : phase.key, isDeload);
+  const toLines = b => b.map(ex => ({ name: ex.name, sets: describeEx(ex) }));
+  const OF = OFFICIAL_W;
 
   if (daysPerWeek === 4) {
     return [
-      { day: 'Lun', tag: 'rest', tagClass: 'tag-rest', name: 'EP HYROX con entrenador', detail: 'Entrenamiento personal · no duplicar', exercises: [
+      { day: 'Lun', tag: 'rest', tagClass: 'tag-rest', logType: 'other', name: 'EP HYROX con entrenador', detail: 'Entrenamiento personal · no duplicar', exercises: [
         { name: '✓ Sesión con tu entrenador personal HYROX', sets: 'Descansa bien la noche anterior' },
         { name: 'Hidratación y recuperación post-sesión', sets: 'Proteína + hidratos en los 30min post' },
       ]},
-      { day: 'Mar', tag: 'strength', tagClass: 'tag-strength', name: 'Fuerza + Estaciones', detail: '60-70 min · Gym', exercises: [
-        { name: 'Calentamiento', sets: '5 min movilidad' },
-        { name: strength, sets: '' },
-        { name: stationsLight, sets: '' },
-        { name: 'Core: Plancha 3×45s, Dead bugs 3×10', sets: '' },
-      ]},
-      { day: 'Mié', tag: 'run', tagClass: 'tag-run', name: `Running aeróbico ${baseRun}km`, detail: `${baseRun}km a ritmo suave (Z2)`, exercises: [
+      { day: 'Mar', tag: 'strength', tagClass: 'tag-strength', logType: 'strength', name: 'Fuerza + Estaciones', detail: '60-70 min · Gym',
+        blocks: [...strengthBlock, ...stationBlock],
+        exercises: [
+          { name: 'Calentamiento', sets: '5 min movilidad' },
+          ...toLines(strengthBlock),
+          ...toLines(stationBlock),
+          { name: 'Core: Plancha 3×45s, Dead bugs 3×10', sets: '' },
+        ]},
+      { day: 'Mié', tag: 'run', tagClass: 'tag-run', logType: 'run', runKm: baseRun, name: `Running aeróbico ${baseRun}km`, detail: `${baseRun}km a ritmo suave (Z2)`, exercises: [
         { name: 'Calentamiento dinámico', sets: '10 min' },
-        { name: `Carrera continua ${baseRun}km`, sets: 'Zona 2 · ~65-70% FC máx' },
+        { name: `Carrera continua ${baseRun}km`, sets: 'Zona 2 · ~65-70% FC máx · RPE 4-5 (puedes hablar)' },
         { name: 'Vuelta a la calma + estiramientos', sets: '10 min' },
       ]},
-      { day: 'Jue', tag: 'run', tagClass: 'tag-run', name: `Tempo / Fartlek ${tempoRun}km`, detail: `${tempoRun}km con cambios de ritmo`, exercises: [
+      { day: 'Jue', tag: 'run', tagClass: 'tag-run', logType: 'run', runKm: tempoRun, name: `Tempo / Fartlek ${tempoRun}km`, detail: `${tempoRun}km con cambios de ritmo`, exercises: [
         { name: 'Calentamiento 1km suave', sets: '' },
-        { name: isPeak ? `6×800m a ritmo objetivo carrera, rec. 2min` : `Fartlek: ${tempoRun}km alternando 2min rápido / 2min suave`, sets: '' },
+        { name: isPeak ? `6×800m a ritmo objetivo carrera, rec. 2min` : `Fartlek: ${tempoRun}km alternando 2min rápido / 2min suave`, sets: 'Tramos rápidos RPE 7-8 · suaves RPE 4' },
         { name: 'Enfriamiento 1km suave', sets: '' },
       ]},
-      { day: 'Vie', tag: isTaper ? 'run' : (isPeak ? 'full' : 'stations'), tagClass: isTaper ? 'tag-run' : (isPeak ? 'tag-full' : 'tag-stations'),
-        name: isTaper ? 'Carrera suave de mantenimiento' : isPeak ? 'Simulación completa 🏁' : 'Sesión larga de estaciones',
-        detail: isTaper ? `${longRun - 4}km regenerativo` : isPeak ? `8km + 8 estaciones (Open F)` : `${longRun}km + circuito estaciones`,
-        exercises: isTaper
-          ? [{ name: `Carrera suave ${longRun - 4}km`, sets: 'Zona 1-2' }, { name: 'Repaso 2-3 estaciones sueltas', sets: 'Muy suave' }]
-          : isPeak
-          ? [
+      isTaper
+        ? { day: 'Vie', tag: 'run', tagClass: 'tag-run', logType: 'run', runKm: longRun - 4, name: 'Carrera suave de mantenimiento', detail: `${longRun - 4}km regenerativo`,
+            blocks: stationBlock,
+            exercises: [{ name: `Carrera suave ${longRun - 4}km`, sets: 'Zona 1-2 · RPE 4' }, ...toLines(stationBlock)] }
+        : isPeak
+        ? { day: 'Vie', tag: 'full', tagClass: 'tag-full', logType: 'full', name: 'Simulación completa 🏁', detail: '8km + 8 estaciones (Open F)', exercises: [
               { name: 'Calentamiento 2km', sets: '' },
-              { name: 'Simulación: 8×(1km run + 1 estación)', sets: 'Al 60-70% de esfuerzo máximo' },
-              { name: `Cargas oficiales: Sled ${sledW} · Sandbag ${sandbagW} · Wall Ball ${wbW} · Farmers ${farmersW}`, sets: '' },
-              { name: 'Anota el tiempo de cada split', sets: '' },
-            ]
-          : [
-              { name: `Carrera long run ${longRun}km`, sets: 'Ritmo suave' },
-              { name: stationsLight, sets: '' },
+              { name: 'Simulación: 8×(1km run + 1 estación)', sets: 'RPE 8 · al 60-70% de tu máximo' },
+              { name: `Cargas oficiales: Sled Push ${OF.sledPush}kg · Sled Pull ${OF.sledPull}kg · Farmers 2×${OF.farmers}kg · Sandbag ${OF.sandbag}kg · Wall Ball ${OF.wallball}kg a 2,70m`, sets: '' },
+              { name: 'Anota el tiempo de cada estación', sets: '' },
+            ]}
+        : { day: 'Vie', tag: 'stations', tagClass: 'tag-stations', logType: 'run', runKm: longRun, name: 'Sesión larga de estaciones', detail: `${longRun}km + circuito estaciones`,
+            blocks: stationBlock,
+            exercises: [
+              { name: `Carrera long run ${longRun}km`, sets: 'Ritmo suave · RPE 5' },
+              ...toLines(stationBlock),
               { name: 'Vuelta a la calma 15min', sets: '' },
-            ]
-      },
-      { day: 'Sáb', tag: 'rest', tagClass: 'tag-rest', name: 'Descanso + Pádel 🎾', detail: 'Recuperación activa · sin sesión programada', exercises: [
+            ]},
+      { day: 'Sáb', tag: 'rest', tagClass: 'tag-rest', logType: 'other', name: 'Descanso + Pádel 🎾', detail: 'Recuperación activa · sin sesión programada', exercises: [
         { name: '🎾 Pádel o paseo', sets: 'Descanso activo — ¡disfrútalo!' },
         { name: 'Estiramientos y movilidad', sets: 'Caderas, gemelos, espalda' },
       ]},
     ];
   } else {
-    // 5 days
+    // 5 días
     return [
-      { day: 'Lun', tag: 'run', tagClass: 'tag-run', name: `Running aeróbico ${baseRun}km`, detail: `${baseRun}km Z2`, exercises: [
-        { name: `Carrera continua ${baseRun}km`, sets: 'Zona 2' },
+      { day: 'Lun', tag: 'run', tagClass: 'tag-run', logType: 'run', runKm: baseRun, name: `Running aeróbico ${baseRun}km`, detail: `${baseRun}km Z2`, exercises: [
+        { name: `Carrera continua ${baseRun}km`, sets: 'Zona 2 · RPE 4-5' },
       ]},
-      { day: 'Mar', tag: 'strength', tagClass: 'tag-strength', name: 'Fuerza inferior', detail: '50-60 min · Gym', exercises: [
-        { name: 'Sentadilla', sets: isBase ? '3x8 · RPE 6-7 · 2-3 reps en reserva' : isBuild ? '4x6 · RPE 7-8 · última serie RPE 9' : isPeak ? '5x5 · RPE 9 · últimas 2 series cerca del fallo' : '3x5 · RPE 6 · suave' },
-        { name: 'Peso muerto', sets: isBase ? '3x8 · RPE 6-7' : isBuild ? '4x5 · RPE 8' : isPeak ? '4x4 · RPE 9 · última al fallo técnico' : '3x3 · RPE 6' },
-        { name: 'Hip thrust', sets: '3x10 · RPE 7-8' },
-        { name: 'Leg curl / Zancadas', sets: '3x12 · RPE 7' },
+      { day: 'Mar', tag: 'strength', tagClass: 'tag-strength', logType: 'strength', name: 'Fuerza', detail: '50-60 min · Gym',
+        blocks: strengthBlock, exercises: toLines(strengthBlock) },
+      { day: 'Mié', tag: 'stations', tagClass: 'tag-stations', logType: 'strength', name: 'Estaciones HYROX', detail: 'Circuito técnico',
+        blocks: stationBlock, exercises: toLines(stationBlock) },
+      { day: 'Jue', tag: 'run', tagClass: 'tag-run', logType: 'run', runKm: tempoRun, name: `Tempo ${tempoRun}km`, detail: 'Ritmo objetivo', exercises: [
+        { name: `Fartlek / Tempo ${tempoRun}km`, sets: 'RPE 7-8 en los tramos rápidos' },
       ]},
-      { day: 'Mié', tag: 'stations', tagClass: 'tag-stations', name: 'Estaciones HYROX', detail: 'Circuito técnico', exercises: [
-        { name: stationsLight, sets: '' },
-      ]},
-      { day: 'Jue', tag: 'run', tagClass: 'tag-run', name: `Tempo ${tempoRun}km`, detail: 'Ritmo objetivo', exercises: [
-        { name: `Fartlek / Tempo ${tempoRun}km`, sets: '' },
-      ]},
-      { day: 'Sáb', tag: isPeak ? 'full' : 'run', tagClass: isPeak ? 'tag-full' : 'tag-run', name: isPeak ? 'Simulación completa' : `Long run ${longRun}km`, detail: isPeak ? '8km+8 estaciones' : `${longRun}km suave`, exercises: [
-        { name: isPeak ? 'Simulación completa 60-70%' : `Long run ${longRun}km`, sets: '' },
+      { day: 'Sáb', tag: isPeak ? 'full' : 'run', tagClass: isPeak ? 'tag-full' : 'tag-run', logType: isPeak ? 'full' : 'run', runKm: isPeak ? undefined : longRun,
+        name: isPeak ? 'Simulación completa' : `Long run ${longRun}km`, detail: isPeak ? '8km+8 estaciones' : `${longRun}km suave`, exercises: [
+        { name: isPeak ? 'Simulación completa 60-70%' : `Long run ${longRun}km`, sets: isPeak ? 'RPE 8' : 'RPE 5' },
       ]},
     ];
   }
+}
+
+// ═══════════════════════════════════════
+// EJERCICIOS ESTRUCTURADOS
+// ═══════════════════════════════════════
+// Pesos oficiales HYROX Open Femenino (reglamento 2025/26). Sleds con el trineo incluido.
+const OFFICIAL_W = { sledPush: 102, sledPull: 78, farmers: 16, sandbag: 10, wallball: 4 };
+
+const rpeMinus = s => String(s).replace(/\d+/g, n => Math.max(5, +n - 1));
+
+function getStrengthBlock(key, deload) {
+  const B = {
+    adapt: [
+      { id: 'goblet', name: 'Sentadilla goblet', sets: 3, reps: '10', rpe: '5-6', note: 'Aprende la técnica: espalda neutra, rodillas hacia fuera' },
+      { id: 'rdl', name: 'Peso muerto rumano', sets: 3, reps: '10', rpe: '6' },
+      { id: 'pushup', name: 'Flexiones', sets: 3, reps: 'máx −2', rpe: '7', noW: true, note: 'Para 2 reps antes de no poder más (vale con rodillas apoyadas)' },
+      { id: 'db-row', name: 'Remo con mancuerna', sets: 3, reps: '12', rpe: '6', unit: 'kg por mano' },
+    ],
+    base: [
+      { id: 'squat', name: 'Sentadilla', sets: 3, reps: '8', rpe: '6-7', note: 'Te tienen que sobrar 2-3 reps' },
+      { id: 'deadlift', name: 'Peso muerto', sets: 3, reps: '8', rpe: '6-7' },
+      { id: 'bench', name: 'Press banca', sets: 3, reps: '10', rpe: '7' },
+      { id: 'bb-row', name: 'Remo con barra', sets: 3, reps: '10', rpe: '7' },
+    ],
+    build: [
+      { id: 'squat', name: 'Sentadilla', sets: 4, reps: '6', rpe: '7-8', note: 'Última serie RPE 8-9 (1-2 reps en reserva)' },
+      { id: 'deadlift', name: 'Peso muerto', sets: 4, reps: '5', rpe: '8' },
+      { id: 'farmers-db', name: 'Farmers carry', sets: 3, reps: '50m', rpe: '8', unit: 'kg por mano' },
+      { id: 'db-lunge', name: 'Zancadas con mancuernas', sets: 3, reps: '20', rpe: '7-8', unit: 'kg por mano' },
+    ],
+    peak: [
+      { id: 'squat', name: 'Sentadilla', sets: 5, reps: '5', rpe: '8-9', note: 'Últimas 2 series muy cerca del fallo' },
+      { id: 'deadlift', name: 'Peso muerto', sets: 4, reps: '4', rpe: '9', note: 'Última serie al fallo técnico' },
+      { id: 'kb-swing', name: 'KB swings', sets: 4, reps: '20', rpe: '8' },
+      { id: 'box-jump', name: 'Box jumps', sets: 3, reps: '10', rpe: '—', noW: true, note: 'Máxima explosividad, descansa lo necesario' },
+    ],
+    taper: [
+      { id: 'squat', name: 'Sentadilla', sets: 3, reps: '5', rpe: '6', note: 'Conservar, no fatigar' },
+      { id: 'deadlift', name: 'Peso muerto', sets: 3, reps: '3', rpe: '6' },
+      { id: 'mobility', name: 'Movilidad y activación', sets: 1, reps: '20 min', rpe: '—', noW: true },
+    ],
+  };
+  const block = (B[key] || B.base).map(e => ({ ...e }));
+  if (deload) block.forEach(e => {
+    e.sets = Math.max(2, e.sets - 1);
+    if (e.rpe !== '—') e.rpe = rpeMinus(e.rpe);
+    e.note = 'Descarga: mismo peso que la semana pasada, 1 serie menos';
+  });
+  return block;
+}
+
+function getStationBlock(key, deload) {
+  const W = OFFICIAL_W;
+  const S = {
+    base: [
+      { id: 'st-skierg', name: 'SkiErg', sets: 3, reps: '500m', rpe: '7', noW: true },
+      { id: 'st-row', name: 'Remo (Rowing)', sets: 3, reps: '500m', rpe: '7', noW: true },
+      { id: 'st-wallball', name: 'Wall Balls', sets: 3, reps: '20', rpe: '7', w: W.wallball, note: 'Peso oficial: 4kg a 2,70m' },
+    ],
+    build: [
+      { id: 'st-skierg', name: 'SkiErg', sets: 2, reps: '1000m', rpe: '7-8', noW: true },
+      { id: 'st-row', name: 'Remo (Rowing)', sets: 2, reps: '1000m', rpe: '7-8', noW: true },
+      { id: 'st-sledpush', name: 'Sled Push', sets: 3, reps: '25m', rpe: '8', w: 80, note: `~80% del peso de carrera (${W.sledPush}kg con trineo). Súbelo cuando te veas fuerte` },
+      { id: 'st-farmers', name: 'Farmers Carry', sets: 2, reps: '100m', rpe: '8', w: W.farmers, unit: 'kg por mano', note: 'Peso oficial: 2×16kg' },
+      { id: 'st-sandbag', name: 'Sandbag Lunges', sets: 2, reps: '50m', rpe: '7-8', w: W.sandbag, note: 'Peso oficial: 10kg' },
+    ],
+    peak: [
+      { id: 'st-skierg', name: 'SkiErg', sets: 2, reps: '1000m', rpe: '8', noW: true, note: 'Circuito: las 8 estaciones seguidas, 2 vueltas' },
+      { id: 'st-sledpush', name: 'Sled Push', sets: 2, reps: '50m', rpe: '8', w: W.sledPush, note: 'Peso de carrera, trineo incluido' },
+      { id: 'st-sledpull', name: 'Sled Pull', sets: 2, reps: '50m', rpe: '8', w: W.sledPull, note: 'Peso de carrera, trineo incluido' },
+      { id: 'st-burpee', name: 'Burpee Broad Jump', sets: 2, reps: '80m', rpe: '8', noW: true },
+      { id: 'st-row', name: 'Remo (Rowing)', sets: 2, reps: '1000m', rpe: '8', noW: true },
+      { id: 'st-farmers', name: 'Farmers Carry', sets: 2, reps: '200m', rpe: '8', w: W.farmers, unit: 'kg por mano' },
+      { id: 'st-sandbag', name: 'Sandbag Lunges', sets: 2, reps: '100m', rpe: '8', w: W.sandbag },
+      { id: 'st-wallball', name: 'Wall Balls', sets: 2, reps: '100', rpe: '8', w: W.wallball },
+    ],
+    taper: [
+      { id: 'st-skierg', name: 'SkiErg', sets: 2, reps: '500m', rpe: '6', noW: true },
+      { id: 'st-sledpush', name: 'Sled Push', sets: 2, reps: '25m', rpe: '6', w: W.sledPush, note: 'Peso de carrera, ritmo cómodo' },
+      { id: 'st-wallball', name: 'Wall Balls', sets: 2, reps: '20', rpe: '6', w: W.wallball },
+    ],
+  };
+  const block = (S[key] || S.base).map(e => ({ ...e }));
+  if (deload) block.forEach(e => {
+    e.sets = Math.max(1, e.sets - 1);
+    if (e.rpe !== '—') e.rpe = rpeMinus(e.rpe);
+  });
+  return block;
+}
+
+function unitOf(ex) { return ex.unit || 'kg'; }
+
+function repsLabel(ex) {
+  return /^\d+$/.test(ex.reps) ? `${ex.reps} reps` : ex.reps;
+}
+
+function describeEx(ex) {
+  const parts = [`${ex.sets > 1 ? ex.sets + ' × ' : ''}${repsLabel(ex)}`];
+  if (ex.rpe && ex.rpe !== '—') parts.push(`RPE ${ex.rpe}`);
+  if (ex.w) parts.push(`${ex.w} ${unitOf(ex)}`);
+  if (ex.note) parts.push(ex.note);
+  return parts.join(' · ');
+}
+
+// Color del RPE: verde (fácil) → rojo (cerca del fallo)
+function rpeColor(rpe) {
+  const n = Math.max(...(String(rpe).match(/\d+/g) || [0]).map(Number));
+  if (!n) return { fg: 'var(--fg2)', bg: 'var(--surface2)' };
+  if (n <= 6) return { fg: 'var(--good)', bg: 'var(--good-bg)' };
+  if (n === 7) return { fg: 'var(--warn)', bg: 'var(--warn-bg)' };
+  if (n === 8) return { fg: '#F97316', bg: 'rgba(249,115,22,0.14)' };
+  return { fg: 'var(--crit)', bg: 'var(--crit-bg)' };
 }
 
 // ═══════════════════════════════════════
@@ -1398,8 +1517,8 @@ function goToView(view) {
   if (view === 'progress') renderProgress();
   if (view === 'home') renderHome();
   if (view === 'log') {
-    const today = new Date().toISOString().split('T')[0];
-    document.getElementById('log-date').value = today;
+    document.getElementById('log-date').value = localISO();
+    populateLogPlan();
     renderLogHistory();
   }
 
@@ -1568,7 +1687,7 @@ function renderPlanWeek(weekNum) {
             </div>
           `).join('')}
         </div>
-        <button class="btn btn-primary btn-sm" style="margin-top:14px" onclick="goToView('log')">
+        <button class="btn btn-primary btn-sm" style="margin-top:14px" onclick="logPlanSession(${weekNum}, ${idx})">
           Registrar esta sesión →
         </button>
       </div>
@@ -1589,12 +1708,143 @@ function toggleSession(id) {
 // ═══════════════════════════════════════
 // LOG
 // ═══════════════════════════════════════
+function localISO(d = new Date()) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function weekForDate(d) {
+  const w = Math.floor((mondayOf(d) - planStartMonday()) / (7 * DAY_MS)) + 1;
+  return Math.max(1, Math.min(getTotalWeeks(), w));
+}
+
+let logPlanSessions = [];
+let logPlan = null;
+
+// Rellena el selector con las sesiones de la semana de la fecha elegida
+function populateLogPlan(preferIdx) {
+  const sel = document.getElementById('log-plan');
+  const dateStr = document.getElementById('log-date').value || localISO();
+  const d = new Date(dateStr + 'T00:00:00');
+  const week = weekForDate(d);
+  logPlanSessions = generateWeekPlan(week, state.trainingDays).map((s, i) => ({ ...s, idx: i, week }));
+  sel.innerHTML = '<option value="">— Sesión libre (fuera del plan) —</option>' +
+    logPlanSessions.map(s => `<option value="${s.idx}">S${week} · ${s.day} · ${s.name}</option>`).join('');
+  let idx = preferIdx;
+  if (idx === undefined) {
+    const dow = (d.getDay() + 6) % 7;
+    const match = logPlanSessions.find(s => DAY_IDX[s.day] === dow);
+    idx = match ? match.idx : '';
+  }
+  sel.value = (idx === '' || idx == null) ? '' : String(idx);
+  selectLogPlanSession();
+}
+
+function selectLogPlanSession() {
+  const v = document.getElementById('log-plan').value;
+  logPlan = v === '' ? null : (logPlanSessions.find(s => String(s.idx) === v) || null);
+  if (logPlan) {
+    document.getElementById('log-type').value = logPlan.logType || 'other';
+    document.getElementById('log-distance').value = logPlan.runKm || '';
+  }
+  renderPlanExercises();
+  updateLogFields();
+}
+
+// Desde la vista del plan: «Registrar esta sesión»
+function logPlanSession(week, idx) {
+  goToView('log');
+  const plan = generateWeekPlan(week, state.trainingDays);
+  const d = planStartMonday();
+  d.setDate(d.getDate() + (week - 1) * 7 + (DAY_IDX[plan[idx].day] || 0));
+  document.getElementById('log-date').value = localISO(d);
+  populateLogPlan(idx);
+}
+
+// Último peso registrado de un ejercicio (el más alto de esa sesión)
+function lastLogFor(exId) {
+  for (const l of state.logs) {
+    const ex = (l.exercisesData || []).find(e => e.id === exId);
+    if (!ex) continue;
+    const ws = (ex.weights || []).filter(w => w != null && !isNaN(w));
+    if (ws.length) return { weight: Math.max(...ws), rpe: ex.rpeReal, date: l.date };
+  }
+  return null;
+}
+
+const RPE_GUIDE = `
+  <details class="rpe-guide">
+    <summary>¿Qué significa el RPE?</summary>
+    <div class="rpe-guide-rows">
+      ${[['6', 'Podrías hacer 4 reps más. Ritmo cómodo'], ['7', 'Te sobran 3 reps. Exigente pero controlado'],
+         ['8', 'Te sobran 2 reps. Duro'], ['9', 'Solo podrías hacer 1 rep más'], ['10', 'Fallo: no podrías hacer ni una más']]
+        .map(([n, t]) => { const c = rpeColor(n); return `<div class="rpe-guide-row"><span class="rpe-badge" style="color:${c.fg};background:${c.bg}">RPE ${n}</span>${t}</div>`; }).join('')}
+      <div style="color:var(--fg3);font-size:12px">Elige el peso con el que la última rep de cada serie se sienta así. Si te sobra mucho, sube; si llegas al fallo antes de tiempo, baja.</div>
+    </div>
+  </details>`;
+
+function renderPlanExercises() {
+  const box = document.getElementById('plan-exercises');
+  const free = document.getElementById('log-exercises-group');
+  const blocks = logPlan && logPlan.blocks;
+  if (!blocks || !blocks.length) {
+    box.innerHTML = '';
+    free.classList.remove('hidden');
+    return;
+  }
+  free.classList.add('hidden');
+  box.innerHTML = `<div class="form-label" style="margin-bottom:8px">Ejercicios de hoy · solo pon el peso</div>` + RPE_GUIDE +
+    blocks.map((ex, i) => {
+      const c = rpeColor(ex.rpe);
+      const last = ex.noW ? null : lastLogFor(ex.id);
+      const sets = Array.from({ length: ex.sets }, (_, j) => `
+        <label class="set-cell"><span>SERIE ${j + 1}</span>
+          <input class="set-w" type="number" inputmode="decimal" step="0.5" min="0" data-set="${j}"
+            value="${ex.w != null ? ex.w : ''}" placeholder="${last ? last.weight : 'kg'}" oninput="onSetInput(this)" aria-label="${ex.name} serie ${j + 1} en ${unitOf(ex)}">
+        </label>`).join('');
+      return `
+      <div class="ex-log-card" data-ex="${i}">
+        <div class="ex-log-head">
+          <div>
+            <div class="ex-log-name">${ex.name}</div>
+            <div class="ex-log-target">${ex.sets > 1 ? ex.sets + ' series × ' : ''}${repsLabel(ex)}</div>
+          </div>
+          ${ex.rpe && ex.rpe !== '—' ? `<span class="rpe-badge" style="color:${c.fg};background:${c.bg}">RPE ${ex.rpe}</span>` : ''}
+        </div>
+        ${ex.note ? `<div class="ex-log-note">${ex.note}</div>` : ''}
+        ${ex.noW
+          ? `<div class="ex-log-noweight">Sin carga · no hace falta apuntar nada</div>`
+          : `<div class="ex-log-sets">${sets}</div><div class="ex-log-unit">en ${unitOf(ex)}</div>`}
+        <div class="ex-log-foot">
+          <div class="ex-log-last">${last ? `Última vez: ${last.weight} ${unitOf(ex)}${last.rpe ? ' · RPE ' + last.rpe : ''}<button type="button" onclick="fillLast(${i}, ${last.weight})">Usar</button>` : ''}</div>
+          ${ex.rpe && ex.rpe !== '—' ? `<label class="rpe-real-label">RPE real
+            <select class="rpe-real"><option value="">–</option>${[5, 6, 7, 8, 9, 10].map(n => `<option>${n}</option>`).join('')}</select></label>` : ''}
+        </div>
+      </div>`;
+    }).join('');
+}
+
+// Al escribir el peso de una serie, se copia a las siguientes que sigan vacías
+function onSetInput(el) {
+  el.dataset.auto = '';
+  const inputs = el.closest('.ex-log-sets').querySelectorAll('.set-w');
+  const j = +el.dataset.set;
+  inputs.forEach((x, k) => {
+    if (k > j && (x.value === '' || x.dataset.auto === '1')) { x.value = el.value; x.dataset.auto = '1'; }
+  });
+}
+
+function fillLast(i, w) {
+  document.querySelectorAll(`.ex-log-card[data-ex="${i}"] .set-w`).forEach(x => { x.value = w; x.dataset.auto = '1'; });
+}
+
 function updateLogFields() {
   const type = document.getElementById('log-type').value;
-  document.getElementById('run-fields').classList.toggle('hidden', type !== 'run');
+  const hasBlocks = !!(logPlan && logPlan.blocks && logPlan.blocks.length);
+  const hasRun = type === 'run' || !!(logPlan && logPlan.runKm);
+  document.getElementById('run-fields').classList.toggle('hidden', !hasRun);
   document.getElementById('station-fields').classList.toggle('hidden', type !== 'stations');
   document.getElementById('full-fields').classList.toggle('hidden', type !== 'full');
-  document.getElementById('strength-fields').classList.toggle('hidden', type !== 'strength');
+  document.getElementById('strength-fields').classList.toggle('hidden', !(type === 'strength' || hasBlocks));
 }
 
 function selectFeel(val) {
@@ -1617,14 +1867,35 @@ function saveLog(e) {
     notes: document.getElementById('log-notes').value,
   };
 
-  if (type === 'run') {
+  if (logPlan) entry.planRef = { week: logPlan.week, day: logPlan.day, name: logPlan.name };
+
+  if (!document.getElementById('run-fields').classList.contains('hidden')) {
     const min = +document.getElementById('run-min').value || 0;
     const sec = +document.getElementById('run-sec').value || 0;
     const dist = parseFloat(document.getElementById('log-distance').value) || 0;
-    entry.distance = dist;
-    entry.totalSecs = min * 60 + sec;
-    entry.pace = dist > 0 ? (min * 60 + sec) / 60 / dist : 0;
-  } else if (type === 'stations') {
+    if (dist > 0 || type === 'run') {
+      entry.distance = dist;
+      entry.totalSecs = min * 60 + sec;
+      entry.pace = dist > 0 ? (min * 60 + sec) / 60 / dist : 0;
+    }
+  }
+
+  if (logPlan && logPlan.blocks && logPlan.blocks.length) {
+    entry.exercisesData = logPlan.blocks.map((ex, i) => {
+      const card = document.querySelector(`.ex-log-card[data-ex="${i}"]`);
+      const weights = card ? [...card.querySelectorAll('.set-w')].map(x => x.value === '' ? null : +x.value) : [];
+      return {
+        id: ex.id, name: ex.name, sets: ex.sets, reps: ex.reps, rpe: ex.rpe, unit: unitOf(ex), noW: !!ex.noW,
+        weights, rpeReal: card?.querySelector('.rpe-real')?.value || '',
+      };
+    });
+    entry.exercises = entry.exercisesData
+      .filter(e => e.weights.some(w => w != null))
+      .map(e => `${e.name} ${e.sets}×${e.reps} @ ${Math.max(...e.weights.filter(w => w != null))}${e.unit === 'kg' ? 'kg' : ' ' + e.unit}`)
+      .join(', ');
+  }
+
+  if (type === 'stations') {
     const stations = ['skierg', 'sled-push', 'sled-pull', 'burpee', 'row', 'farmers', 'sandbag', 'wallball'];
     const stationNames = ['SkiErg', 'Sled Push', 'Sled Pull', 'Burpee', 'Rowing', 'Farmers Carry', 'Sandbag Lunges', 'Wall Balls'];
     entry.stations = {};
@@ -1640,7 +1911,7 @@ function saveLog(e) {
     const m = +document.getElementById('full-m').value || 0;
     const s = +document.getElementById('full-s').value || 0;
     entry.totalSecs = h * 3600 + m * 60 + s;
-  } else if (type === 'strength') {
+  } else if (type === 'strength' && !entry.exercisesData) {
     entry.exercises = document.getElementById('log-exercises').value;
   }
 
@@ -1648,7 +1919,9 @@ function saveLog(e) {
   saveState();
   showToast('✓ Entrenamiento guardado');
   document.getElementById('log-form').reset();
-  updateLogFields();
+  document.getElementById('log-date').value = localISO();
+  selectFeel(5);
+  populateLogPlan();
   renderLogHistory();
 }
 
@@ -1663,19 +1936,27 @@ function renderLogHistory() {
   const feelLabels = ['', '😩', '😕', '😐', '😊', '🔥'];
 
   container.innerHTML = state.logs.slice(0, 20).map(l => {
-    let detail = '';
-    if (l.type === 'run' && l.distance) {
-      detail = `${l.distance}km · ${formatTime(l.totalSecs)} · ${formatPace(l.pace)}/km`;
+    const details = [];
+    if (l.distance) {
+      details.push(`${l.distance}km${l.totalSecs ? ' · ' + formatTime(l.totalSecs) + ' · ' + formatPace(l.pace) + '/km' : ''}`);
     } else if (l.type === 'full' && l.totalSecs) {
-      detail = `Tiempo: ${formatTime(l.totalSecs)}`;
+      details.push(`Tiempo: ${formatTime(l.totalSecs)}`);
     } else if (l.type === 'stations' && l.stations) {
-      const count = Object.keys(l.stations).length;
-      detail = `${count} estaciones registradas`;
+      details.push(`${Object.keys(l.stations).length} estaciones registradas`);
     }
+    if (l.exercisesData) {
+      l.exercisesData.filter(e => (e.weights || []).some(w => w != null)).forEach(e => {
+        const top = Math.max(...e.weights.filter(w => w != null));
+        details.push(`${e.name}: ${e.sets}×${e.reps} @ ${top}${e.unit === 'kg' ? 'kg' : ' ' + e.unit}${e.rpeReal ? ' · RPE ' + e.rpeReal : ''}`);
+      });
+    } else if (l.exercises) {
+      details.push(l.exercises);
+    }
+    const detail = details.join('<br>');
 
     return `<div class="card" style="margin-bottom:8px">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
-        <div style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:14px">${typeLabels[l.type] || l.type}</div>
+        <div style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:14px">${l.planRef ? l.planRef.name : (typeLabels[l.type] || l.type)}</div>
         <div style="font-size:18px">${feelLabels[l.feel] || ''}</div>
       </div>
       <div style="font-size:12px;color:var(--fg3);margin-bottom:${detail ? '4px' : '0'}">${l.date}</div>
@@ -2009,11 +2290,10 @@ if (!state.startDate) {
 }
 
 // Set today's date in log form
-const todayStr = new Date().toISOString().split('T')[0];
-document.getElementById('log-date').value = todayStr;
+document.getElementById('log-date').value = localISO();
 
 // Init
-updateLogFields();
+populateLogPlan();
 renderHome();
 renderLogHistory();
 
