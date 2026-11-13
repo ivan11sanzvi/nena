@@ -1,0 +1,7 @@
+# Datos personales: nunca al repositorio público
+*.json.bak
+hyroxnena-*.json
+*.zip
+vista-previa.html
+node_modules/
+__pycache__/
