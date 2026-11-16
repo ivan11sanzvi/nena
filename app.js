@@ -2,7 +2,7 @@
 (function () {
   // ---------- Constantes ----------
   const KEY = 'hyroxnena.v1';
-  const VERSION = '1.0.0';
+  const VERSION = '1.1.0';
   const CLAVE_VIEJA = 'hyrox-state'; // la primera versión de la app
   const CARRERA_DEF = { fecha: '2027-04-18', ciudad: 'Málaga', categoria: 'Open Femenino' };
   // Pesos oficiales HYROX Open Femenino (reglamento 2025/26). Los trineos, con el trineo incluido.
@@ -80,13 +80,14 @@
 
   // ---------- Datos ----------
   function nuevoDB() {
-    return { v: 1, carrera: Object.assign({}, CARRERA_DEF), inicio: lunesDe(hoyISO()), registros: [], objetivo: {}, ultimaCopia: null, ultimoCambio: null };
+    return { v: 1, carrera: Object.assign({}, CARRERA_DEF), inicio: lunesDe(hoyISO()), registros: [], objetivo: {}, horario: Array.from({ length: 7 }, () => []), ultimaCopia: null, ultimoCambio: null };
   }
   function normalizar(d) {
     const o = Object.assign(nuevoDB(), d && typeof d === 'object' ? d : {});
     o.carrera = Object.assign({}, CARRERA_DEF, o.carrera || {});
     if (!Array.isArray(o.registros)) o.registros = [];
     if (!o.objetivo || typeof o.objetivo !== 'object') o.objetivo = {};
+    if (!Array.isArray(o.horario) || o.horario.length !== 7) o.horario = Array.from({ length: 7 }, () => []);
     if (!/^\d{4}-\d\d-\d\d$/.test(o.inicio || '')) o.inicio = lunesDe(hoyISO());
     o.inicio = lunesDe(o.inicio);
     return o;
@@ -237,7 +238,7 @@
     const par = f.en % 2 === 0;
 
     const lun = { tipo: 'ep', titulo: 'Entreno con tu entrenador', resumen: 'Tu sesión HYROX de los lunes',
-      detalle: ['Lo que te mande tu entrenador. Al terminar, apunta cómo fue y el esfuerzo (RPE).', desc ? 'Es semana de descarga: díselo por si quiere bajar un poco la carga.' : ''] };
+      detalle: ['Lo que te mande tu entrenador. Al terminar, apunta cada ejercicio con sus series, repeticiones, peso y RPE.', 'Si repetís ejercicios, usa «Copiar el lunes anterior» y solo pones los pesos de hoy.', desc ? 'Es semana de descarga: díselo por si quiere bajar un poco la carga.' : ''] };
     const mar = { tipo: 'fuerza', titulo: 'Fuerza + estaciones', resumen: '60-70 min en el gimnasio',
       detalle: ['Calentamiento 8 min: movilidad de cadera y hombros y 2 series suaves del primer ejercicio', 'Descansa 2 min entre series de fuerza y 90 s entre estaciones', 'Termina con core: plancha 3 × 40 s y dead bug 3 × 10', notaDesc],
       bloques: [...bloqueFuerza(k, desc), ...estMartes(k, desc)] };
@@ -273,11 +274,13 @@
         resumen: k === 'adapt' ? 'Conocer las estaciones sin prisa' : 'Primero corres, luego las estaciones',
         detalle: [k === 'adapt' ? `${largo} km muy suaves` : `${largo} km a ritmo suave (Zona 2)`, 'Después las estaciones, con 90 s de descanso', notaDesc], bloques: estViernes(k, desc) };
     }
-    const sab = { tipo: 'descanso', titulo: 'Descanso activo', resumen: 'Pádel o paseo si te apetece', detalle: ['Si juegas al pádel, apúntalo en el registro', 'Estira caderas, gemelos y espalda'] };
+    const sab = { tipo: 'descanso', titulo: 'Descanso activo', resumen: 'Paseo, bici suave o lo que te apetezca', detalle: ['Estira caderas, gemelos y espalda', 'Si juegas al pádel, apúntalo en el registro'] };
     const dom = { tipo: 'descanso', titulo: 'Descanso', resumen: 'Recupera: duerme bien y come bien', detalle: [] };
     let semana = [lun, mar, mie, jue, vie, sab, dom];
 
     if (n === total) semana = semanaCarrera();
+    else semana = ajustarAlHorario(semana);
+    notasHorario(semana);
     return semana.map((s, i) => Object.assign(s, { semana: n, dia: i, fecha: masDias(lunesSemana(n), i), detalle: (s.detalle || []).filter(Boolean) }));
   }
   function semanaCarrera() {
@@ -299,6 +302,110 @@
   }
   const sesionDe = (n, i) => (n >= 1 && n <= totalSemanas()) ? sesionesSemana(n)[i] : null;
   const sesionDeFecha = s => sesionDe(semanaDe(s), diaSemana(s));
+
+  // ---------- Horario de trabajo ----------
+  // db.horario: 7 listas (0 = lunes) de bloques ocupados {i: 'HH:MM', f: 'HH:MM', t: texto}. Solo en el móvil.
+  const DIA_INI = 8 * 60, DIA_FIN = 22 * 60, MARGEN = 30; // margen para ir, cambiarse y ducharse
+  const aMin = h => { const m = String(h || '').match(/^(\d{1,2})[:.h](\d{2})$/); return m ? +m[1] * 60 + +m[2] : null; };
+  const aHora = m => `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}`;
+  const bloquesDia = d => ((db.horario || [])[d] || []).filter(b => aMin(b.i) != null && aMin(b.f) > aMin(b.i)).sort((a, b) => aMin(a.i) - aMin(b.i));
+  const hayHorario = () => [0, 1, 2, 3, 4, 5, 6].some(d => bloquesDia(d).length);
+  function huecos(d) {
+    const out = []; let t = DIA_INI;
+    for (const b of bloquesDia(d)) { const a = aMin(b.i), f = aMin(b.f); if (a > t) out.push([t, Math.min(a, DIA_FIN)]); t = Math.max(t, f); }
+    if (t < DIA_FIN) out.push([t, DIA_FIN]);
+    return out.filter(([a, b]) => b - a >= 30);
+  }
+  const mejorHueco = d => huecos(d).reduce((m, h) => !m || h[1] - h[0] > m[1] - m[0] ? h : m, null);
+  const minutosLibres = d => { const h = mejorHueco(d); return h ? Math.max(0, h[1] - h[0] - MARGEN) : 0; };
+  // Minutos aproximados de cada sesión (con su ritmo real si ya ha apuntado carreras)
+  function ritmoHabitual() { const rs = db.registros.filter(r => r.km && r.seg); return rs.length ? sum(rs, r => r.seg) / sum(rs, r => r.km) : 420; }
+  function duracion(s) {
+    const rk = ritmoHabitual() / 60, series = (s.bloques || []).reduce((t, e) => t + (+e.s || 1), 0);
+    if (s.tipo === 'fuerza') return 15 + series * 3;
+    if (s.tipo === 'carrera') return Math.round((s.km || 5) * rk + 15);
+    if (s.tipo === 'mixta') return Math.round((s.km || 0) * rk + 15 + series * 4);
+    if (s.tipo === 'simulacion') return s.estaciones && s.estaciones.length < 8 ? 65 : 110;
+    if (s.tipo === 'ep') return 60;
+    return 0;
+  }
+  // Si una sesión de martes a viernes no cabe en el hueco libre de su día, se cambia por otra que sí quepa.
+  // Si todo cabe, la semana se queda como está.
+  function ajustarAlHorario(sem) {
+    if (!hayHorario()) return sem;
+    const D = [1, 2, 3, 4];
+    const cabe = (s, d) => !esEntreno(s) || duracion(s) <= minutosLibres(d);
+    for (const d of D) {
+      if (cabe(sem[d], d)) continue;
+      const e = D.filter(x => x !== d && cabe(sem[d], x) && cabe(sem[x], d)).sort((a, b) => minutosLibres(b) - minutosLibres(a))[0];
+      if (e == null) continue;
+      const a = sem[d], b = sem[e];
+      sem[d] = b; sem[e] = a;
+      if (b.desde == null) b.desde = e; if (a.desde == null) a.desde = d;
+    }
+    return sem;
+  }
+  function notasHorario(sem) {
+    sem.forEach((s, d) => {
+      s.detalle = s.detalle || [];
+      if (s.desde != null && s.desde !== d) s.detalle.unshift(`Movida desde el ${DIAS_L[s.desde].toLowerCase()} para que te dé tiempo con tu horario.`);
+      if (hayHorario() && esEntreno(s) && s.tipo !== 'ep' && duracion(s) > minutosLibres(d)) s.detalle.push(`Con tu horario tienes unos ${minutosLibres(d)} min seguidos y esta sesión lleva unos ${duracion(s)}: si no llegas, recorta las estaciones del final.`);
+      const padel = bloquesDia(d).find(b => /padel/.test(normNom(b.t)));
+      if (padel && esEntreno(s)) s.detalle.push(`Hoy a las ${padel.i} tienes pádel: también cuenta como esfuerzo, así que no lo des todo en este entreno.`);
+    });
+  }
+
+  // Importar el horario desde un Excel con los días arriba y las franjas («9:30 - 10:00») en una columna
+  let promXLSX = null;
+  function cargarXLSX() {
+    if (window.XLSX) return Promise.resolve(window.XLSX);
+    if (!promXLSX) promXLSX = new Promise((ok, ko) => {
+      // Primero la copia del repositorio; si no está (vista previa), la de internet
+      const fuentes = [window.XLSX_SRC || 'vendor/xlsx.full.min.js', 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'];
+      const probar = k => {
+        if (k >= fuentes.length) { promXLSX = null; ko(new Error('sin red')); return; }
+        const sc = document.createElement('script'); sc.src = fuentes[k];
+        sc.onload = () => window.XLSX ? ok(window.XLSX) : probar(k + 1);
+        sc.onerror = () => { sc.remove(); probar(k + 1); };
+        document.head.appendChild(sc);
+      };
+      probar(0);
+    });
+    return promXLSX;
+  }
+  const DIAS_N = ['lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado', 'domingo'];
+  function leerHorarioExcel(X, wb) {
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const rg = X.utils.decode_range(ws['!ref'] || 'A1');
+    const val = (r, c) => { const cel = ws[X.utils.encode_cell({ r, c })]; return cel ? String(cel.w != null ? cel.w : cel.v).trim() : ''; };
+    let fh = -1; const cols = {};
+    for (let r = rg.s.r; r <= rg.e.r && fh < 0; r++) {
+      const c2 = {};
+      for (let c = rg.s.c; c <= rg.e.c; c++) { const k = DIAS_N.indexOf(normNom(val(r, c))); if (k >= 0) c2[c] = k; }
+      if (Object.keys(c2).length >= 3) { fh = r; Object.assign(cols, c2); }
+    }
+    if (fh < 0) throw new Error('No encuentro los días de la semana en la primera hoja');
+    const franja = {};
+    for (let r = fh + 1; r <= rg.e.r; r++) for (let c = rg.s.c; c <= rg.e.c; c++) {
+      const m = val(r, c).match(/(\d{1,2})[:.](\d{2})\s*[-–a]+\s*(\d{1,2})[:.](\d{2})/);
+      if (m) { franja[r] = [+m[1] * 60 + +m[2], +m[3] * 60 + +m[4]]; break; }
+    }
+    if (!Object.keys(franja).length) throw new Error('No encuentro las horas («9:30 - 10:00»)');
+    const merges = ws['!merges'] || [];
+    const horario = Array.from({ length: 7 }, () => []);
+    let gym = 0;
+    for (let r = fh + 1; r <= rg.e.r; r++) {
+      if (!franja[r]) continue;
+      for (const [c, d] of Object.entries(cols)) {
+        const v = val(r, +c); if (!v) continue;
+        if (/^(gym|gimnasio)\b/.test(normNom(v))) { gym++; continue; } // el gimnasio no es trabajo
+        const mg = merges.find(m => m.s.r === r && m.s.c === +c);
+        let fin = mg ? mg.e.r : r; while (fin > r && !franja[fin]) fin--;
+        horario[d].push({ i: aHora(franja[r][0]), f: aHora(franja[fin][1]), t: v });
+      }
+    }
+    return { horario, gym };
+  }
   const esEntreno = s => s && s.tipo !== 'descanso';
 
   // Texto de un ejercicio: «3 × 8 reps · RPE 7 · 60 kg»
@@ -669,6 +776,20 @@
   // Tipos que se pueden elegir para un entreno fuera del plan
   const TIPOS_LIBRES = ['fuerza', 'carrera', 'mixta', 'simulacion', 'padel', 'ep', 'otro'];
 
+  // ---------- Ejercicios que escribe ella (lunes con su entrenador y entrenos fuera del plan) ----------
+  const normNom = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  // Todos los ejercicios conocidos (del plan y de lo ya apuntado), para sugerir nombres y unir sesiones
+  function catalogoEjercicios() {
+    const m = new Map();
+    const add = e => { if (e && e.n) { const k = normNom(e.n); if (k && !m.has(k)) m.set(k, { id: e.id, n: e.n, u: e.u }); } };
+    ['adapt', 'base', 'build', 'peak', 'taper'].forEach(k => { bloqueFuerza(k).forEach(add); estMartes(k).forEach(add); estViernes(k).forEach(add); });
+    db.registros.forEach(r => (r.ejercicios || []).forEach(add));
+    return m;
+  }
+  // El mismo nombre siempre da el mismo id: «Sentadilla» del lunes y del martes cuentan como el mismo ejercicio
+  const idDeNombre = n => { const c = catalogoEjercicios().get(normNom(n)); return c ? c.id : 'ep-' + normNom(n).replace(/ /g, '-'); };
+  const RPES = ['5', '6', '7', '8', '9', '10', '5-6', '6-7', '7-8', '8-9'];
+
   function formRegistro(opts = {}) {
     const r0 = opts.id ? registro(opts.id) : null;
     const st = {
@@ -680,6 +801,40 @@
     else if (opts.sem) st.plan = { semana: +opts.sem, dia: +opts.dia };
     else if (!opts.libre) { const s = sesionDeFecha(st.fecha); if (esEntreno(s) && !hechoEn(s.semana, s.dia)) st.plan = { semana: s.semana, dia: s.dia }; }
     const sesionPlan = () => st.plan ? sesionDe(st.plan.semana, st.plan.dia) : null;
+    // Los ejercicios se escriben a mano el lunes (EP) y en fuerza o mixta fuera del plan
+    const editable = () => { const s = sesionPlan(); return s ? s.tipo === 'ep' : ['ep', 'fuerza', 'mixta'].includes(st.tipo); };
+    const bloquesPlan = () => { const s = sesionPlan(); return s && s.tipo !== 'ep' ? (s.bloques || []) : []; };
+    st.libres = r0 && (r0.semana == null || r0.tipo === 'ep') ? (r0.ejercicios || []).map(e => Object.assign({}, e, { pesos: (e.pesos || []).slice() })) : [];
+    const ultimoLunes = () => ordenados().find(r => r.tipo === 'ep' && (r.ejercicios || []).length && (!r0 || r.id !== r0.id)) || null;
+
+    const tarjetaLibre = (e, i) => {
+      const ult = e.n ? ultimoPeso(idDeNombre(e.n), r0 && r0.id) : null;
+      const u = e.u || 'kg', s = Math.max(1, Math.min(12, +e.s || 1));
+      return `<div class="ejlog libre" data-ej="L${i}" data-lib="${i}">
+        <div class="cab"><input class="lnom" data-lf="n" list="dlEj" value="${esc(e.n || '')}" placeholder="Ejercicio (por ejemplo, Sentadilla)" aria-label="Nombre del ejercicio ${i + 1}" autocomplete="off"><button type="button" class="iconbtn quitar" data-quitar="${i}" aria-label="Quitar este ejercicio">${ico.x}</button></div>
+        <div class="grid4">
+          <label class="mini"><span>Series</span><input type="number" inputmode="numeric" min="1" max="12" data-lf="s" value="${s}"></label>
+          <label class="mini"><span>Reps</span><input data-lf="r" value="${esc(e.r || '')}" placeholder="10"></label>
+          <label class="mini"><span>RPE</span><select data-lf="rpe"><option value="">—</option>${RPES.map(v => `<option${String(e.rpe) === v ? ' selected' : ''}>${v}</option>`).join('')}</select></label>
+          <label class="mini"><span>Peso en</span><select data-lf="u"><option value="kg"${u === 'kg' ? ' selected' : ''}>kg</option><option value="kg por mano"${u === 'kg por mano' ? ' selected' : ''}>kg/mano</option></select></label>
+        </div>
+        <div class="series">${Array.from({ length: s }, (_, j) => `<label class="serie"><span>SERIE ${j + 1}</span><input type="number" inputmode="decimal" step="0.5" min="0" data-serie="${j}" value="${(e.pesos || [])[j] != null ? e.pesos[j] : ''}" placeholder="${ult ? fmtN(ult.peso) : 'kg'}" aria-label="Serie ${j + 1}, peso"></label>`).join('')}</div>
+        <div class="nota">Sin peso (burpees, saltos…): deja las series en blanco.</div>
+        <div class="pie"><span>${ult ? `La última vez: <b>${fmtN(ult.peso)} ${esc(u)}</b>${ult.rpe ? ` · RPE ${esc(ult.rpe)}` : ''}<button type="button" class="link" data-usar="L${i}" data-p="${ult.peso}">Usar</button>` : ''}</span>
+          <label>RPE real <select data-rpereal aria-label="RPE real"><option value="">–</option>${[5, 6, 7, 8, 9, 10].map(n => `<option${String(e.rpeReal) === String(n) ? ' selected' : ''}>${n}</option>`).join('')}</select></label></div>
+      </div>`;
+    };
+    const editorLibre = () => {
+      const lunes = ultimoLunes();
+      return `<div class="stack"><b>Ejercicios</b>
+        <p class="small muted">Apunta lo que habéis hecho: ejercicio, series, repeticiones, el RPE que te pidió y el peso de cada serie. El peso de la primera serie se copia solo a las demás.</p>
+        ${GUIA_RPE}
+        ${st.libres.map(tarjetaLibre).join('')}
+        <div class="btns"><button type="button" class="btn primary" data-anadir style="flex:1">${ico.plus} Añadir ejercicio</button>
+        ${lunes && !st.libres.some(e => e.n) ? `<button type="button" class="btn" data-copiar-lunes style="flex:1">Copiar el lunes ${fmtCorta(lunes.fecha)}</button>` : ''}</div>
+        <datalist id="dlEj">${[...catalogoEjercicios().values()].sort((a, b) => a.n.localeCompare(b.n, 'es')).map(c => `<option value="${esc(c.n)}">`).join('')}</datalist>
+      </div>`;
+    };
 
     const opcionesPlan = () => {
       const n = semanaDe(st.fecha);
@@ -694,7 +849,7 @@
       return `<div class="ejlog" data-ej="${i}">
         <div class="cab"><div><div class="n">${esc(e.n)}</div><div class="obj">${esc(objetivoTxt(e))}</div></div>${rpePill(e.rpe)}</div>
         ${e.nota ? `<div class="nota">${esc(e.nota)}</div>` : ''}
-        ${e.sinPeso ? '<div class="nota">Sin peso: no hace falta apuntar nada.</div>' : `<div class="series">${Array.from({ length: e.s }, (_, j) => `<label class="serie"><span>SERIE ${j + 1}</span><input type="number" inputmode="decimal" step="0.5" min="0" data-serie="${j}" value="${ini(j)}" placeholder="${ult ? fmtN(ult.peso) : 'kg'}" aria-label="${esc(e.n)}, serie ${j + 1}, ${esc(unidad(e))}"></label>`).join('')}</div><div class="nota">en ${esc(unidad(e))}</div>`}
+        ${e.sinPeso ? '<div class="nota">Sin peso: no hace falta apuntar nada.</div>' : `<div class="series">${Array.from({ length: e.s }, (_, j) => `<label class="serie"><span>SERIE ${j + 1}</span><input type="number" inputmode="decimal" step="0.5" min="0" data-serie="${j}" value="${ini(j)}"${pesos[j] == null && e.w != null && !prev ? ' data-auto="1"' : ''} placeholder="${ult ? fmtN(ult.peso) : 'kg'}" aria-label="${esc(e.n)}, serie ${j + 1}, ${esc(unidad(e))}"></label>`).join('')}</div><div class="nota">en ${esc(unidad(e))}</div>`}
         <div class="pie"><span>${ult ? `La última vez: <b>${fmtN(ult.peso)} ${esc(unidad(e))}</b>${ult.rpe ? ` · RPE ${esc(ult.rpe)}` : ''}<button type="button" class="link" data-usar="${i}" data-p="${ult.peso}">Usar</button>` : ''}</span>
           ${e.rpe && e.rpe !== '—' ? `<label>RPE real <select data-rpereal aria-label="RPE real de ${esc(e.n)}"><option value="">–</option>${[5, 6, 7, 8, 9, 10].map(n => `<option${prev && String(prev.rpeReal) === String(n) ? ' selected' : ''}>${n}</option>`).join('')}</select></label>` : ''}</div>
       </div>`;
@@ -703,7 +858,7 @@
     const cuerpo = () => {
       const s = sesionPlan();
       const tipo = s ? s.tipo : st.tipo;
-      const bloques = s ? (s.bloques || []) : (r0 && r0.semana == null ? (r0.ejercicios || []) : []);
+      const bloques = bloquesPlan();
       const prevEj = id => r0 ? (r0.ejercicios || []).find(x => x.id === id) : null;
       let h = '';
       if (!s) {
@@ -712,8 +867,9 @@
       } else {
         h += `<div class="card pad" style="display:flex;gap:10px;align-items:center">${icoTipo(s.tipo)}<div style="flex:1;min-width:0"><b>${esc(s.titulo)}</b><div class="small muted">${esc(s.resumen || '')}</div></div>${rpePill(s.rpe)}</div>`;
       }
-      if (bloques.length) h += `<div class="stack"><div class="sp"><b>Ejercicios · solo pon el peso</b></div>${GUIA_RPE}${bloques.map((e, i) => tarjetaEj(e, i, prevEj(e.id))).join('')}</div>`;
-      else if (!s && (tipo === 'fuerza' || tipo === 'mixta')) h += `<div class="field"><label for="rEjLibre">Qué has hecho</label><textarea id="rEjLibre" placeholder="Sentadilla 4 × 8 con 40 kg…">${esc(r0 ? r0.ejLibre || '' : '')}</textarea></div>`;
+      if (editable()) h += editorLibre();
+      else if (bloques.length) h += `<div class="stack"><div class="sp"><b>Ejercicios · solo pon el peso</b></div>${GUIA_RPE}${bloques.map((e, i) => tarjetaEj(e, i, prevEj(e.id))).join('')}</div>`;
+      if (r0 && r0.ejLibre) h += `<div class="field"><label for="rEjLibre">Qué has hecho</label><textarea id="rEjLibre">${esc(r0.ejLibre)}</textarea></div>`;
       if (tipo === 'carrera' || tipo === 'mixta' || (!s && tipo === 'otro')) {
         const kmIni = r0 ? (r0.km != null ? String(r0.km).replace('.', ',') : '') : (s && s.km ? s.km : '');
         h += `<div class="stack"><b>Carrera</b><div class="grid2"><div class="field"><label for="rKm">Kilómetros</label><input id="rKm" inputmode="decimal" value="${kmIni}" placeholder="0"></div>
@@ -745,7 +901,17 @@
 
     abrirCapa(html, (el, d) => {
       let rpe = r0 ? r0.rpe || null : null;
-      const repintar = () => { el.querySelector('#rCuerpo').innerHTML = cuerpo(); vivo(); };
+      // Guarda en st.libres lo escrito en las tarjetas antes de volver a pintarlas
+      const leerLibres = () => {
+        el.querySelectorAll('[data-lib]').forEach(c => {
+          const e = st.libres[+c.dataset.lib]; if (!e) return;
+          const v = k => c.querySelector(`[data-lf="${k}"]`).value;
+          e.n = v('n').trim(); e.s = Math.max(1, Math.min(12, parseInt(v('s'), 10) || 1)); e.r = v('r').trim(); e.rpe = v('rpe'); e.u = v('u');
+          e.pesos = [...c.querySelectorAll('[data-serie]')].map(x => { const p = parseNum(x.value); return p == null || isNaN(p) ? null : p; });
+          e.rpeReal = c.querySelector('[data-rpereal]').value;
+        });
+      };
+      const repintar = () => { leerLibres(); el.querySelector('#rCuerpo').innerHTML = cuerpo(); vivo(); };
       const vivo = () => {
         const km = parseNum((el.querySelector('#rKm') || {}).value), seg = parseT((el.querySelector('#rTiempo') || {}).value);
         const rr = el.querySelector('#rRitmo'); if (rr) rr.textContent = km > 0 && seg > 0 ? `Ritmo: ${fmtT(seg / km)} por km` : '';
@@ -761,7 +927,18 @@
         el.querySelector('#rPlan').innerHTML = opcionesPlan(); repintar();
       });
       el.querySelector('#rPlan').addEventListener('change', e => { const v = e.target.value; st.plan = v ? { semana: +v.split('|')[0], dia: +v.split('|')[1] } : null; repintar(); });
-      el.addEventListener('change', e => { if (e.target.id === 'rTipo') { st.tipo = e.target.value; repintar(); } });
+      el.addEventListener('change', e => {
+        if (e.target.id === 'rTipo') { st.tipo = e.target.value; repintar(); }
+        // Al cambiar el nombre, las series o la unidad se vuelve a pintar la tarjeta (número de series, «la última vez»)
+        // Solo se repinta esa tarjeta, así un toque en otro botón no se pierde
+        const lf = e.target.dataset.lf;
+        if (lf === 'n' || lf === 's' || lf === 'u') {
+          leerLibres();
+          const c = e.target.closest('[data-lib]'), i = +c.dataset.lib;
+          const t = document.createElement('div'); t.innerHTML = tarjetaLibre(st.libres[i], i);
+          c.replaceWith(t.firstElementChild);
+        }
+      });
       el.addEventListener('input', e => {
         const t = e.target;
         if (t.dataset.serie != null) {
@@ -777,6 +954,23 @@
         if (u) { el.querySelectorAll(`[data-ej="${u.dataset.usar}"] [data-serie]`).forEach(x => { x.value = u.dataset.p; x.dataset.auto = '1'; }); return; }
         const b = e.target.closest('[data-rpe]');
         if (b) { rpe = rpe === +b.dataset.rpe ? null : +b.dataset.rpe; vivo(); return; }
+        if (e.target.closest('[data-anadir]')) {
+          leerLibres();
+          const prev = st.libres[st.libres.length - 1];
+          st.libres.push({ n: '', s: prev ? prev.s : 3, r: prev ? prev.r : '', rpe: prev ? prev.rpe : '', u: 'kg', pesos: [] });
+          repintar();
+          const ns = el.querySelectorAll('[data-lf="n"]'); if (ns.length) { ns[ns.length - 1].focus(); ns[ns.length - 1].scrollIntoView({ block: 'center' }); }
+          return;
+        }
+        const q = e.target.closest('[data-quitar]');
+        if (q) { leerLibres(); st.libres.splice(+q.dataset.quitar, 1); repintar(); return; }
+        if (e.target.closest('[data-copiar-lunes]')) {
+          const l = ultimoLunes(); if (!l) return;
+          st.libres = l.ejercicios.map(x => ({ n: x.n, s: x.s, r: x.r, rpe: x.rpe, u: x.u || 'kg', pesos: [] }));
+          el.querySelectorAll('[data-lib]').forEach(c => c.removeAttribute('data-lib'));
+          repintar(); toast(`Copiados ${st.libres.length} ejercicios: pon los pesos de hoy`);
+          return;
+        }
         if (e.target.closest('[data-borrar]')) {
           const r = await confirmar('¿Borrar este entreno?', `Se borrará «${esc(r0.titulo)}» del ${fmtFecha(r0.fecha)}.`);
           if (!r.ok) return;
@@ -788,8 +982,13 @@
           const tipo = s ? s.tipo : st.tipo;
           const r = { id: r0 ? r0.id : uid(), fecha: st.fecha, semana: s ? s.semana : null, dia: s ? s.dia : null, tipo,
             titulo: s ? s.titulo : ((el.querySelector('#rTitulo') || {}).value || '').trim() || TIPOS[tipo].n, rpe, notas: el.querySelector('#rNotas').value.trim() };
-          const bloques = s ? (s.bloques || []) : (r0 && r0.semana == null ? (r0.ejercicios || []) : []);
-          if (bloques.length) {
+          const bloques = bloquesPlan();
+          if (editable()) {
+            leerLibres();
+            const cat = catalogoEjercicios();
+            const ej = st.libres.filter(x => x.n).map(x => ({ id: idDeNombre(x.n), n: (cat.get(normNom(x.n)) || x).n, s: x.s, r: x.r, rpe: x.rpe, u: x.u || 'kg', sinPeso: false, pesos: (x.pesos || []).slice(0, x.s), rpeReal: x.rpeReal || '' }));
+            if (ej.length) r.ejercicios = ej;
+          } else if (bloques.length) {
             r.ejercicios = bloques.map((e2, i) => {
               const card = el.querySelector(`[data-ej="${i}"]`);
               const pesos = card ? [...card.querySelectorAll('[data-serie]')].map(x => x.value === '' ? null : parseNum(x.value)) : [];
@@ -844,6 +1043,11 @@
           <div class="field"><label for="aInicio">El plan empezó la semana del</label><input type="date" id="aInicio" value="${db.inicio}"><span class="hint">El plan va desde esa semana hasta la carrera: ahora son ${totalSemanas()} semanas.</span></div>
           <button class="btn block" data-a="guardarCarrera">Guardar cambios de la carrera</button>
         </div>
+        <h2 class="sec">Mi horario</h2>
+        <div class="card pad stack">${resumenHorario()}
+          <button class="btn ${hayHorario() ? '' : 'primary '}block" data-a="horarioExcel">Importar horario desde Excel</button>
+          <button class="btn block" data-a="horarioVer">${hayHorario() ? 'Ver o cambiar el horario' : 'Escribirlo a mano'}</button>
+        </div>
         <h2 class="sec">Aspecto</h2>
         <div class="segs" role="group" aria-label="Tema">${[['auto', 'Automático'], ['light', 'Claro'], ['dark', 'Oscuro']].map(([k, t]) => `<button data-tema="${k}" aria-pressed="${tema === k}">${t}</button>`).join('')}</div>
         <h2 class="sec">Datos</h2>
@@ -866,6 +1070,8 @@
         else if (a === 'descargar') { await exportar(false); repintar(); }
         else if (a === 'importar') $('#fileIn').click();
         else if (a === 'viejos') { volverA(d - 1); traerViejos(); }
+        else if (a === 'horarioExcel') importarHorario(repintar);
+        else if (a === 'horarioVer') hojaHorario(repintar);
         else if (a === 'guardarCarrera') {
           const f = el.querySelector('#aFecha').value, c = el.querySelector('#aCiudad').value.trim(), ini = el.querySelector('#aInicio').value;
           if (!f || !ini) { toast('Pon la fecha de la carrera y la del inicio'); return; }
@@ -886,6 +1092,64 @@
     else document.documentElement.removeAttribute('data-theme');
     const m = document.querySelector('meta[name="theme-color"]');
     if (m) m.setAttribute('content', (t === 'dark' || (t !== 'light' && window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches)) ? '#2a1840' : '#7e22ce');
+  }
+
+  // ---------- Horario: resumen, importar y editar ----------
+  function resumenHorario() {
+    if (!hayHorario()) return '<p>Si pones tu horario de trabajo, el plan comprueba que cada sesión te quepa en el día. Si un día no te da tiempo, la cambia por la de otro día en que sí.</p>';
+    return `<p class="small muted">Cada sesión del plan tiene que caber en tu hueco libre más largo del día (con ${MARGEN} min para ir y ducharte).</p>
+      <table class="tabla"><thead><tr><th>Día</th><th>Ocupado</th><th>Libre seguido</th></tr></thead><tbody>${DIAS.map((d, i) => {
+        const bs = bloquesDia(i), h = mejorHueco(i);
+        return `<tr><td>${d}</td><td>${bs.length ? `${bs[0].i}–${bs[bs.length - 1].f}` : '—'}</td><td>${h ? `${aHora(h[0])}–${aHora(h[1])}` : '—'}</td></tr>`;
+      }).join('')}</tbody></table>`;
+  }
+  function importarHorario(alAcabar) {
+    const inp = document.createElement('input');
+    inp.type = 'file'; inp.accept = '.xlsx,.xls,.ods,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel';
+    inp.addEventListener('change', async () => {
+      const file = inp.files[0]; if (!file) return;
+      let X;
+      try { X = await cargarXLSX(); } catch (e) { toast('Para leer el Excel hace falta cobertura la primera vez'); return; }
+      let res;
+      try { res = leerHorarioExcel(X, X.read(await file.arrayBuffer(), { type: 'array' })); }
+      catch (e) { toast(e && e.message ? e.message : 'No he podido leer ese Excel'); return; }
+      const n = res.horario.reduce((t, d) => t + d.length, 0);
+      if (!n) { toast('El Excel no tiene ninguna clase'); return; }
+      const r = await confirmar('¿Usar este horario?', `He encontrado <b>${n} bloques</b> de trabajo${res.gym ? ` (sin contar ${res.gym} de gimnasio)` : ''}:<br><br>${DIAS.map((d, i) => res.horario[i].length ? `<b>${d}</b>: ${res.horario[i].sort((a, b) => aMin(a.i) - aMin(b.i)).map(b => `${b.i}–${b.f}`).join(', ')}` : '').filter(Boolean).join('<br>')}<br><br>Sustituye al horario que hubiera.`, 'Usar horario');
+      if (!r.ok) return;
+      db.horario = res.horario; guardar(); render(); if (alAcabar) alAcabar(); toast('Horario guardado: plan ajustado');
+    });
+    inp.click();
+  }
+  function hojaHorario(alAcabar) {
+    const contenido = () => `${DIAS_L.map((d, i) => {
+        const bs = bloquesDia(i);
+        return `<div class="stack" style="gap:6px"><b>${d}</b>${bs.length ? `<div class="list">${bs.map(b => `<div class="row" style="min-height:52px"><div class="main"><div class="t">${b.i} – ${b.f}</div><div class="s">${esc(b.t || 'Trabajo')}</div></div><button class="iconbtn" data-quitar-h="${i}|${(db.horario[i] || []).indexOf(b)}" aria-label="Quitar ${b.i} a ${b.f}">${ico.x}</button></div>`).join('')}</div>` : '<p class="small muted">Libre</p>'}</div>`;
+      }).join('')}
+      <div class="card pad stack"><b>Añadir un bloque</b>
+        <div class="grid2"><div class="field"><label for="hDia">Día</label><select id="hDia">${DIAS_L.map((d, i) => `<option value="${i}">${d}</option>`).join('')}</select></div>
+          <div class="field"><label for="hTxt">Qué es</label><input id="hTxt" placeholder="Clase, trabajo…"></div></div>
+        <div class="grid2"><div class="field"><label for="hIni">Desde</label><input id="hIni" type="time" value="16:00"></div><div class="field"><label for="hFin">Hasta</label><input id="hFin" type="time" value="17:00"></div></div>
+        <button class="btn primary block" data-anadir-h>${ico.plus} Añadir</button></div>
+      ${hayHorario() ? '<button class="btn danger block" data-borrar-h>Quitar todo el horario</button>' : ''}`;
+    abrirCapa(`<div class="sheet" role="dialog" aria-modal="true">${cabecera('Mi horario')}<div class="body" id="hBody">${contenido()}</div></div>`, el => {
+      const body = el.querySelector('#hBody');
+      const cambiado = () => { guardar(); render(); body.innerHTML = contenido(); if (alAcabar) alAcabar(); };
+      el.addEventListener('click', async e => {
+        const q = e.target.closest('[data-quitar-h]');
+        if (q) { const [d, k] = q.dataset.quitarH.split('|').map(Number); db.horario[d].splice(k, 1); cambiado(); return; }
+        if (e.target.closest('[data-anadir-h]')) {
+          const d = +el.querySelector('#hDia').value, i = el.querySelector('#hIni').value, f = el.querySelector('#hFin').value;
+          if (!(aMin(i) < aMin(f))) { toast('La hora de fin tiene que ser después de la de inicio'); return; }
+          db.horario[d].push({ i: aHora(aMin(i)), f: aHora(aMin(f)), t: el.querySelector('#hTxt').value.trim() });
+          cambiado(); toast('Bloque añadido'); return;
+        }
+        if (e.target.closest('[data-borrar-h]')) {
+          const r = await confirmar('¿Quitar todo el horario?', 'El plan volverá a la semana de siempre, sin mover sesiones.', 'Quitar');
+          if (r.ok) { db.horario = Array.from({ length: 7 }, () => []); cambiado(); }
+        }
+      });
+    });
   }
 
   // ---------- Archivos: compartir o descargar ----------
